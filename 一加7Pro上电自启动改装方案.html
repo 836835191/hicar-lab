@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一加 7 Pro 上电自启动改装方案（HiCar 车机）</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1f2430; --muted:#5b6472;
+    --line:#e3e7ee; --accent:#2563eb; --accent-soft:#eaf1ff;
+    --warn:#b45309; --warn-bg:#fff7e6; --danger:#b91c1c; --danger-bg:#fef2f2;
+    --code-bg:#0f172a; --code-ink:#e2e8f0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",sans-serif;
+    line-height:1.75; font-size:15px;
+  }
+  .wrap{max-width:980px; margin:0 auto; padding:32px 22px 80px;}
+  header.hero{
+    background:linear-gradient(135deg,#1e3a8a,#2563eb); color:#fff;
+    border-radius:16px; padding:34px 34px 28px; box-shadow:0 10px 30px rgba(37,99,235,.22);
+  }
+  header.hero h1{margin:0 0 8px; font-size:28px; letter-spacing:.5px;}
+  header.hero .sub{opacity:.9; font-size:14px;}
+  .hero-meta{margin-top:18px; display:flex; flex-wrap:wrap; gap:10px;}
+  .hero-meta span{background:rgba(255,255,255,.16); padding:5px 12px; border-radius:999px; font-size:12px;}
+  .toolbar{margin:18px 0 10px; display:flex; gap:10px; justify-content:flex-end;}
+  button.print{
+    border:1px solid var(--line); background:var(--card); color:var(--ink);
+    padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px;
+  }
+  button.print:hover{border-color:var(--accent); color:var(--accent);}
+  nav.toc{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:18px 22px; margin-bottom:26px;
+  }
+  nav.toc b{display:block; margin-bottom:10px; color:var(--accent);}
+  nav.toc ol{margin:0; padding-left:22px; columns:2; column-gap:36px;}
+  nav.toc li{margin:4px 0; break-inside:avoid;}
+  nav.toc a{color:var(--ink); text-decoration:none;}
+  nav.toc a:hover{color:var(--accent); text-decoration:underline;}
+  section{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:24px 28px; margin-bottom:20px;
+  }
+  h2{
+    font-size:20px; margin:0 0 16px; padding-left:12px;
+    border-left:4px solid var(--accent); color:#172554;
+  }
+  h3{font-size:16px; margin:22px 0 10px; color:#1e3a8a;}
+  p{margin:10px 0;}
+  .note,.danger{
+    border-radius:8px; padding:12px 16px; margin:14px 0; font-size:14px;
+  }
+  .note{background:var(--warn-bg); border-left:4px solid var(--warn); color:#7c2d12;}
+  .danger{background:var(--danger-bg); border-left:4px solid var(--danger); color:#7f1d1d;}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14px;}
+  th,td{border:1px solid var(--line); padding:9px 12px; text-align:left; vertical-align:top;}
+  th{background:var(--accent-soft); color:#1e3a8a; font-weight:600;}
+  tr:nth-child(even) td{background:#fafbfc;}
+  pre{
+    background:var(--code-bg); color:var(--code-ink); border-radius:10px;
+    padding:16px 18px; overflow-x:auto; line-height:1.55;
+    font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    font-size:12.5px; margin:12px 0;
+  }
+  code.inline{background:#eef2f7; padding:1px 6px; border-radius:4px; font-size:13px; color:#0f172a;}
+  .cap{font-size:12px; color:var(--muted); margin:4px 0 10px;}
+  ul,ol{padding-left:22px;}
+  li{margin:5px 0;}
+  .steps{counter-reset:step; list-style:none; padding-left:0;}
+  .steps li{position:relative; padding-left:34px; margin:10px 0;}
+  .steps li::before{
+    counter-increment:step; content:counter(step);
+    position:absolute; left:0; top:1px; width:24px; height:24px; border-radius:50%;
+    background:var(--accent); color:#fff; font-size:12px; text-align:center; line-height:24px;
+  }
+  footer{text-align:center; color:var(--muted); font-size:12px; margin-top:30px;}
+  @media print{
+    body{background:#fff; font-size:12px;}
+    .wrap{max-width:none; padding:0;}
+    .toolbar,nav.toc{display:none;}
+    header.hero{box-shadow:none; border-radius:0; padding:18px;}
+    section{break-inside:avoid; border:none; padding:10px 0; margin:0;}
+    pre{background:#f3f4f6; color:#111; border:1px solid #ddd;}
+    h2{font-size:16px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>一加 7 Pro 上电自启动改装方案</h1>
+  <div class="sub">去除电池 · 上电自启 · 用于 HiCar Receiver 车机系统</div>
+  <div class="hero-meta">
+    <span>平台：骁龙 855 / 高通 PMIC</span>
+    <span>方案：外部 3.9V 直供 VBAT + MCU 模拟电源键</span>
+    <span>文档版本：v1.0</span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <button class="print" onclick="window.print()">打印 / 另存为 PDF</button>
+</div>
+
+<nav class="toc">
+  <b>目录</b>
+  <ol>
+    <li><a href="#s1">方案总览</a></li>
+    <li><a href="#s2">系统接线框图（图1）</a></li>
+    <li><a href="#s3">物料清单 BOM</a></li>
+    <li><a href="#s4">手机端拆机与飞线</a></li>
+    <li><a href="#s5">模拟按键电路（图4）</a></li>
+    <li><a href="#s6">MCU 程序</a></li>
+    <li><a href="#s7">台架测试</a></li>
+    <li><a href="#s8">车载安装（图5）</a></li>
+    <li><a href="#s9">手机端软件设置</a></li>
+    <li><a href="#s10">关机处理</a></li>
+    <li><a href="#s11">风险与排错清单</a></li>
+  </ol>
+</nav>
+
+<div class="note">
+一加 7 Pro（骁龙 855 平台）改无电池、上电自启动，本质是两件事：<b>给主板持续供电</b> + <b>上电后模拟一次电源键长按</b>。文中所有图纸可直接交给焊接师傅。涉及"测试点"的地方给出了用万用表自行确认的方法——这是最可靠的方式。<b>务必先在台架上用可调电源试通，再装车。</b>
+</div>
+
+<section id="s1">
+<h2>一、方案总览</h2>
+<table>
+  <tr><th>方案</th><th>做法</th><th>评价</th></tr>
+  <tr><td>A（推荐）</td><td>拆掉电芯、保留电池排线小板和 NTC → 外部 3.9V 直供 VBAT → MCU 模拟电源键</td><td>最稳，高通平台认电池，上电必开机</td></tr>
+  <tr><td>B</td><td>5V 从 USB-C 进 → MCU 模拟电源键</td><td>简单，但无电池时部分机型只显示充电图标不开机，且"充电常亮"设置才有效</td></tr>
+  <tr><td>C</td><td>淘宝成品"通电自启动模块"</td><td>免焊，但多数要保留电池，不符合拆电池需求</td></tr>
+</table>
+<p>下文按 <b>方案 A</b> 展开。核心原理：手机开机的条件是 <b>VBAT 有电</b> + <b>BAT_THERM 检测到 10kΩ（电池常温下）</b> + <b>PWRKEY 被拉低 1~2 秒</b>。我们用外部电源模拟"电池"，用 MCU+光耦模拟"手指按电源键"。</p>
+</section>
+
+<section id="s2">
+<h2>二、系统接线框图（图1）</h2>
+<pre>
+  汽车 ACC（钥匙电 12V）
+        │
+      [保险丝 3A]
+        │
+   ┌────▼──────────────┐
+   │ DC-DC 降压模块      │  XL4015(5A) 或 LM2596(3A) 可调
+   │ 12V → 3.9V         │  输出调成 3.85~3.95V
+   └────┬──────────────┘
+        │
+        ├──[1000µF/6.3V 低ESR]──┐
+        │                        │
+        ├──────────► 手机 VBAT（电池排线 + 极）
+        │
+        ├──────────► MCU VCC（ATtiny85，8MHz 内部时钟）
+        │                 │
+        │            ┌────▼─────┐
+        │            │ 光耦 PC817│──► 电源键两端（模拟按键）
+        │            └──────────┘
+        │
+  车身 GND ┴────────────────────────────────────
+        ├──────────► 手机 VBAT −（电池排线 − 极）
+        ├──────────► 电池排线 NTC（10kΩ 到 GND，原厂保留）
+        └──────────► MCU GND / 光耦输入侧 GND
+</pre>
+<p class="cap">说明：输出 3.9V 模拟一块约 50% 电量的锂电池。<b>不要调到 4.2V 以上。</b>1000µF 电容用于吸收开机瞬间 2~3A 的电流尖峰。</p>
+</section>
+
+<section id="s3">
+<h2>三、物料清单（BOM）</h2>
+<table>
+  <tr><th>项目</th><th>型号 / 规格</th><th>数量</th><th>备注</th></tr>
+  <tr><td>降压模块</td><td>XL4015（5A）优先，LM2596（3A）也可</td><td>1</td><td>可调输出，调到 3.9V</td></tr>
+  <tr><td>MCU</td><td>ATtiny85 最小板，或 Arduino Nano</td><td>1</td><td>用 Arduino IDE 烧录</td></tr>
+  <tr><td>光耦</td><td>PC817</td><td>1</td><td>隔离按键信号</td></tr>
+  <tr><td>电阻</td><td>330Ω、10kΩ</td><td>各 1~2</td><td>光耦限流 / 备用 NTC</td></tr>
+  <tr><td>电解电容</td><td>1000µF / 6.3V 低 ESR</td><td>1</td><td>并在 3.9V 输出</td></tr>
+  <tr><td>保险丝</td><td>车用 3A（带保险座）</td><td>1</td><td>必须</td></tr>
+  <tr><td>导线</td><td>AWG20~22 耐高温硅胶线（红/黑）</td><td>若干</td><td>电源线</td></tr>
+  <tr><td>飞线</td><td>AWG30~32 漆包 / 硅胶细线</td><td>若干</td><td>焊电源键用</td></tr>
+  <tr><td>接插件</td><td>4P JST-XH 或 2.54 排针</td><td>1 套</td><td>方便拆装</td></tr>
+  <tr><td>工具</td><td>热风枪、吸锡器、尖头烙铁、万用表、镊子、放大镜</td><td>—</td><td>焊细线建议放大镜</td></tr>
+  <tr><td>散热</td><td>手机背夹散热片 / 40mm 风扇</td><td>1</td><td>车内暴晒必备</td></tr>
+</table>
+</section>
+
+<section id="s4">
+<h2>四、手机端拆机与飞线（关键步骤）</h2>
+
+<h3>4.1 拆机</h3>
+<ol class="steps">
+  <li>关机 → 取卡托 → 热风枪加热后盖四周（约 80~100℃）→ 用吸盘+撬片开后盖。</li>
+  <li><b>第一件事：断开电池排线</b>（防止短路烧主板）。</li>
+  <li>拆掉主板盖 14 颗螺丝（有一颗在白色贴纸下），取下盖板。此时电池排线和侧键排线都暴露了。</li>
+</ol>
+
+<h3>4.2 电池处理（图2）</h3>
+<p>不要直接往主板电池座上焊——间距太细，风险大。<b>保留电池自带的排线小 PCB，只把电芯去掉</b>：</p>
+<pre>
+   ┌────────────────────────────────────────────┐
+   │  电池排线小 PCB（电芯已拆除）                 │
+   │                                            │
+   │    ┌────┐       ┌────────┐                 │
+   │    │ +  ├───────┤ 红线   ├────► 外部 3.9V   │
+   │    └────┘       └────────┘                 │
+   │    ┌────┐       ┌────────┐                 │
+   │    │ −  ├───────┤ 黑线   ├────► GND         │
+   │    └────┘       └────────┘                 │
+   │                                            │
+   │    ┌──────────┐                            │
+   │    │ NTC 10kΩ │  保持原样，别动              │
+   │    └──────────┘                            │
+   │                                            │
+   │      ══════════ 排线 ══════════► 插回主板座  │
+   └────────────────────────────────────────────┘
+</pre>
+<ul>
+  <li>用电烙铁/热风枪把电芯镍片从排线 PCB 焊盘上取下，或用斜口钳在远离焊盘处剪断镍片，留下足够焊接的焊盘。</li>
+  <li><b>务必保留 NTC</b>。万用表量 NTC 两端，室温应约 10kΩ。若弄坏，在 BAT_THERM 与 GND 之间焊一个 10kΩ 电阻代替。</li>
+  <li>焊上红/黑硅胶线后，用热缩管绝缘，把排线插回主板。</li>
+  <li>上电前万用表确认：红线对黑线约 3.9V，NTC 对 GND 约 10kΩ，无短路。</li>
+</ul>
+
+<h3>4.3 电源键飞线（图3）</h3>
+<p><b>优先方案</b>：焊到侧键排线上的电源按键开关两端。一加 7 Pro 右侧是电源键+音量键软排线，拆下金属盖板即可看到：</p>
+<pre>
+   侧键软排线（局部放大示意）
+
+   ┌───────────────────────────────┐
+   │  [电源键微动开关]              │
+   │     ● A        ● B            │  ← 这两个焊点
+   │     └── 按下时 A-B 导通 ──┘    │
+   │                               │
+   │  [音量+][音量-]  ← 不要焊这里   │
+   └───────────────────────────────┘
+          │  细线 AWG30 两根
+          └──► 引到主板附近，接光耦输出
+</pre>
+<ul>
+  <li>万用表蜂鸣档确认：未按电源键时 A-B 断开，按住时 A-B 导通。</li>
+  <li>焊两根极细的线，点少量焊锡，热缩管固定，最好用少量热熔胶做应力释放。</li>
+</ul>
+<p><b>备用方案（找不到开关焊点时）</b>：直接找主板上的 PWRKEY 测试点。方法：万用表黑表笔接主板屏蔽罩（GND），红表笔打蜂鸣/电压档，在主板边缘、电源管理芯片（PMIC）附近的小圆测试点上扫描。<b>找到一个"平时约 1.8V，按住电源键时变成 0V"的点，那就是 PWRKEY</b>。焊一根线到该点，另一根接 GND。</p>
+
+<h3>4.4 引出线缆</h3>
+<p>把电源线（红/黑）和电源键线（A/B）从机身引出。建议从 SIM 卡槽缺口或耳机/USB 口附近的缝隙走线，不要在主板正上方钻孔。用一个 4P 插头汇聚，方便日后维护：</p>
+<pre>
+  4P 接口定义：
+  1 = VBAT + (红)
+  2 = VBAT − (黑/GND)
+  3 = PWRKEY A
+  4 = PWRKEY B
+</pre>
+</section>
+
+<section id="s5">
+<h2>五、模拟按键电路（图4）</h2>
+<p>用光耦 PC817，输入侧由 MCU 控制，输出侧直接跨接在电源键开关两端：</p>
+<pre>
+   MCU 侧（3.9V 供电，与手机共地）：
+
+        ATtiny85
+        PB3(D3) ──┬──[330Ω]──┬──>|──┐
+                  │          │ LED │ PC817-1
+                  │          └─────┘
+                  │                 │
+                 GND─────────────────┘
+
+   手机侧（光耦输出，隔离浮地）：
+
+        电源键 A (PWRKEY 信号) ──── C  ┐
+                                    ├─ PC817-2
+        电源键 B (GND)         ──── E  ┘
+</pre>
+<p><b>工作过程</b>：MCU 的 PB3 输出高电平 → 光耦 LED 亮 → 输出侧 C-E 导通 → 相当于电源键被按下；PB3 变低 → 松开。</p>
+<div class="note">若不想用光耦，且 MCU 与手机共地，可直接用 NPN 三极管（S8050）：集电极接 PWRKEY 信号，发射极接 GND，基极经 1kΩ 接 MCU_IO，基极再加 10kΩ 下拉到 GND。效果相同但无隔离。</div>
+</section>
+
+<section id="s6">
+<h2>六、MCU 程序（ATtiny85，Arduino IDE）</h2>
+<p>先安装 ATTinyCore 板卡包，选择 <b>ATtiny85 @ 8 MHz (internal)</b>，引脚按 ATTiny85 映射（PB3 = D3，PB4 = D4）。</p>
+<pre>
+// 一加7Pro 上电自启动 - ATtiny85
+// PB3(D3) -> 330Ω -> PC817 LED -> GND   (模拟电源键)
+const byte PIN_KEY = 3;
+
+void keyPress(unsigned int ms) {
+  digitalWrite(PIN_KEY, HIGH);   // 按下
+  delay(ms);
+  digitalWrite(PIN_KEY, LOW);    // 松开
+}
+
+void setup() {
+  pinMode(PIN_KEY, OUTPUT);
+  digitalWrite(PIN_KEY, LOW);
+
+  // 等待降压模块和手机 PMIC 稳定
+  delay(4000);
+
+  // 模拟长按电源键 1.5 秒
+  keyPress(1500);
+}
+
+void loop() {
+  // 需要"再次补按"的机型可取消下面注释：
+  // delay(12000);
+  // keyPress(1500);
+}
+</pre>
+<p><b>调试方法</b>：若上电后没开机，把 <code class="inline">delay(4000)</code> 改成 <code class="inline">12000</code>（有些机型要等充电图标出现才认按键），按键时长在 1200~2000ms 之间试。台架上可用 LED 代替光耦先看时序是否正确。</p>
+</section>
+
+<section id="s7">
+<h2>七、台架测试（装车前必做）</h2>
+<ol class="steps">
+  <li>可调电源设 <b>3.9V、限流 3A</b>，接到手机排线红/黑线。万用表量手机端电压应在 3.8~4.0V。</li>
+  <li>给 MCU 上电，观察：约 4 秒后光耦动作，再 1~2 秒后手机应震动/亮屏/进开机动画。</li>
+  <li>若没反应：查 PWRKEY 飞线是否焊对（按下时是否真的被拉低）；查 NTC 是否 10kΩ；加长上电延时或按键时长。</li>
+  <li>能稳定开机后，反复断电/上电 10 次，确认每次都成功。</li>
+  <li>断开 3.9V，确认手机正常关机。</li>
+</ol>
+</section>
+
+<section id="s8">
+<h2>八、车载安装（图5）</h2>
+<pre>
+   汽车保险盒（Acc 供电，例如点烟器/收音机保险）
+        │
+      [取电器 + 3A 保险丝]
+        │
+        ├──── 红（+12V）──► 降压模块 IN+
+        │
+        └───────────────── 车身金属螺丝 ── GND
+                              │
+   降压模块 OUT+ (3.9V) ───────┼──► 手机 4P 接口的 1 脚
+   降压模块 OUT− ──────────────┼──► 手机 4P 接口的 2 脚
+   MCU PB3 → 光耦 → ───────────┼──► 手机 4P 接口的 3、4 脚
+</pre>
+<div class="danger">
+<b>安装注意</b><br>
+• <b>ACC 取电</b>：钥匙拧到 ACC/ON 才有电，熄火断电，避免亏电。用保险取电器，不要直接破线。<br>
+• 降压模块放在通风处，别塞在密封空间。<br>
+• 手机固定：用出风口/中控台支架，<b>不要挡住安全气囊和视线</b>。<br>
+• 散热：一加 7 Pro 的 90Hz 屏 + 855 发热大，夏天车内暴晒极易过热降频。建议拆掉原后盖，加铝制背夹散热片，最好再加 40mm USB 风扇对着主板吹。<br>
+• 音频：一加 7 Pro <b>没有 3.5mm 耳机孔</b>，需要 USB-C 音频转换器或蓝牙连车机。
+</div>
+</section>
+
+<section id="s9">
+<h2>九、手机端软件设置（开机后直接进 HiCar）</h2>
+<ol class="steps">
+  <li><b>设为默认桌面</b>：设置 → 应用 → 默认应用 → 主屏幕应用选 HiCar receiver。或 ADB：<br>
+      <code class="inline">adb shell cmd package set-home-activity 你的包名/你的Activity</code></li>
+  <li><b>关掉锁屏</b>：设置 → 安全与锁屏 → 屏幕锁定 → 无。</li>
+  <li><b>保持常亮</b>：我们是 VBAT 供电，系统不认为是"充电"，开发者选项的"充电时屏幕常亮"可能无效。用 ADB：<br>
+      <code class="inline">adb shell settings put system screen_off_timeout 2147483647</code></li>
+  <li><b>电池优化白名单</b>：<code class="inline">adb shell dumpsys deviceidle whitelist +你的包名</code></li>
+  <li>关闭系统自动更新、禁用不必要的应用通知，减少后台干扰。</li>
+  <li>若需要 root 后用 Magisk 模块强制自启 HiCar 也可以，但不是必须。</li>
+</ol>
+</section>
+
+<section id="s10">
+<h2>十、关机处理（如实说明）</h2>
+<p>熄火后 ACC 断电，降压模块停止输出，手机 VBAT 消失 → <b>硬关机</b>。这是绝大多数手机改车机的通用做法，ext4/f2fs 文件系统有日志，通常不会损坏数据。</p>
+<p>如果你一定要"软关机"：需要让 MCU 在 ACC 断开后还能活 10 秒。做法是从<b>常电（电瓶直通）</b>单独取一路给 MCU 供电，MCU 检测到 ACC 变低后，拉低 PWRKEY 保持 8~10 秒触发关机，再关掉降压模块的 EN 脚。代价是 MCU 常驻耗电约 10~20mA，长期停放会缓慢亏电，建议加电压检测，低于 12.2V 就彻底断电。</p>
+</section>
+
+<section id="s11">
+<h2>十一、风险与排错清单</h2>
+<table>
+  <tr><th>现象</th><th>排查</th></tr>
+  <tr><td>上电无任何反应</td><td>查保险丝、降压模块输出是否 3.9V；查电池排线是否插紧</td></tr>
+  <tr><td>亮充电图标但不开机</td><td>延长 MCU 上电延时到 12~16s；确认 NTC 为 10kΩ</td></tr>
+  <tr><td>开机后反复重启</td><td>降压模块电流不足或纹波太大 → 换 XL4015，输出电容加大到 2200µF</td></tr>
+  <tr><td>随机不开机</td><td>PWRKEY 飞线虚焊 → 重新焊并点热熔胶固定</td></tr>
+  <tr><td>机身发烫</td><td>加强散热，降低屏幕亮度，关闭 90Hz</td></tr>
+  <tr><td>熄火后几天电瓶亏电</td><td>检查 ACC 取电是否接错成常电</td></tr>
+</table>
+<div class="danger">
+<b>最后提醒</b>：第一步一定是在台架上用可调电源完整跑通"断电 → 上电 → 自动开机 → 进 HiCar"至少 10 次，确认稳定后再装车。焊接电源键飞线时用放大镜和尖头烙铁，动作要轻，主板焊盘很脆弱。如果你把拍下来的主板照片和电池排线照片发给我，我可以帮你具体标出该焊哪几个点。
+</div>
+</section>
+
+<footer>文档由 AI 助手整理 · 供一加 7 Pro + HiCar Receiver 车机改装参考</footer>
+
+</div>
+</body>
+</html>

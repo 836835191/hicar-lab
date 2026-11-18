@@ -1,0 +1,300 @@
+package local.hicarlab;
+
+import android.content.Context;
+import android.media.*;
+import android.os.*;
+import java.io.*;
+import java.nio.*;
+import java.util.*;
+import java.util.concurrent.*;
+
+/** AAC-LC -> PCM16 AudioTrack, per native SSRC stream; no recording. */
+final class AudioSink implements AudioReceiver.Sink {
+  private final Context context;
+  private final AudioManager manager;
+  private final AudioFocusRequest focus;
+  private final Map<Integer, Stream> streams = new HashMap<>();
+  private volatile boolean closed, focused;
+
+  /** 校验 AAC 解码器可用并申请音频焦点，失败时释放焦点并抛异常。 */
+  AudioSink(Context c) throws IOException {
+    context = c.getApplicationContext();
+    manager = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+    MediaFormat probe = MediaFormat.createAudioFormat("audio/mp4a-latm", 48000, 2);
+    if (new MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(probe) == null)
+      throw new IOException("AAC decoder unavailable");
+    focus =
+        new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attributes())
+            .setWillPauseWhenDucked(true)
+            .setOnAudioFocusChangeListener(this::focusChanged, new Handler(Looper.getMainLooper()))
+            .build();
+    focused = manager.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+    if (!focused) {
+      manager.abandonAudioFocusRequest(focus);
+      throw new IOException("audio focus unavailable");
+    }
+    DiagnosticLog.add(context, "AAC 解码能力与音频焦点已就绪；尚未实际解码或出声。");
+  }
+
+  /** 构建媒体用途、音乐内容类型的音频属性。 */
+  private static AudioAttributes attributes() {
+    return new AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+        .build();
+  }
+
+  /** 返回音频输出是否仍可用（未关闭）。 */
+  public boolean ready() {
+    return !closed;
+  }
+
+  /** 根据焦点变化更新状态并通知各流播放或暂停清队，记录焦点日志。 */
+  private synchronized void focusChanged(int value) {
+    focused = value == AudioManager.AUDIOFOCUS_GAIN;
+    for (Stream s : streams.values()) s.focus(focused);
+    if (!closed) DiagnosticLog.add(context, focused ? "本轮音频焦点已恢复。" : "本轮音频焦点暂停，清理播放队列。");
+  }
+
+  /** 按流标识分发帧，必要时新建流或替换已结束、格式变化的流。 */
+  public synchronized void offer(AudioMedia.Frame frame) {
+    if (closed || !focused) return;
+    Stream stream = streams.get(frame.stream);
+    if (stream != null && stream.ended && System.nanoTime() - stream.finished < 1000000000L) return;
+    if (stream == null
+        || stream.ended
+        || stream.rate != frame.rate
+        || stream.channels != frame.channels) {
+      if (stream != null) stream.close();
+      else if (streams.size() >= 8) return;
+      stream = new Stream(frame);
+      streams.put(frame.stream, stream);
+      stream.start();
+    }
+    stream.offer(frame);
+  }
+
+  /** 关闭并清空所有播放流。 */
+  public synchronized void reset() {
+    for (Stream s : streams.values()) s.close();
+    streams.clear();
+  }
+
+  /** 关闭所有播放流并释放已申请的音频焦点。 */
+  public synchronized void close() {
+    if (closed) return;
+    closed = true;
+    focused = false;
+    reset();
+    manager.abandonAudioFocusRequest(focus);
+  }
+
+  private final class Stream implements Runnable {
+    final int rate, channels, index;
+    final ArrayBlockingQueue<byte[]> pending = new ArrayBlockingQueue<>(32);
+    volatile boolean ended;
+    volatile AudioTrack track;
+    long samples, decoded, nonzero, drops;
+    volatile long finished;
+
+    /** 用首帧初始化流的采样率、声道数和采样率索引。 */
+    Stream(AudioMedia.Frame first) {
+      rate = first.rate;
+      channels = first.channels;
+      index = first.rateIndex;
+    }
+
+    /** 启动该流的解码播放线程。 */
+    void start() {
+      new Thread(this, "lab-aac-playback").start();
+    }
+
+    void offer(AudioMedia.Frame f) {
+      byte[] data = f.data.clone();
+      if (!pending.offer(data)) {
+        byte[] old = pending.poll();
+        if (old != null) Arrays.fill(old, (byte) 0);
+        if (!pending.offer(data)) Arrays.fill(data, (byte) 0);
+        drops++;
+      }
+    }
+
+    /** 根据焦点开关控制 AudioTrack 播放或暂停清空，并清空待播放队列。 */
+    void focus(boolean enabled) {
+      AudioTrack audio = track;
+      if (audio != null)
+        try {
+          if (enabled) audio.play();
+          else {
+            audio.pause();
+            audio.flush();
+          }
+        } catch (RuntimeException ignored) {
+        }
+      if (!enabled) clear();
+    }
+
+    /** 清空待播放队列并将其中数据字节清零。 */
+    void clear() {
+      byte[] b;
+      while ((b = pending.poll()) != null) Arrays.fill(b, (byte) 0);
+    }
+
+    void close() {
+      ended = true;
+      clear();
+      AudioTrack audio = track;
+      if (audio != null)
+        try {
+          audio.pause();
+          audio.flush();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    /** 解码线程主循环：配置 MediaCodec 与 AudioTrack，循环送入 AAC 帧并写出 PCM，处理焦点切换并在结束时释放资源。 */
+    public void run() {
+      MediaCodec codec = null;
+      byte[] frame = null;
+      try {
+        MediaFormat format = MediaFormat.createAudioFormat("audio/mp4a-latm", rate, channels);
+        format.setInteger(
+            MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+        format.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT);
+        format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 8192);
+        int asc = (2 << 11) | (index << 7) | (channels << 3);
+        format.setByteBuffer("csd-0", ByteBuffer.wrap(new byte[] {(byte) (asc >>> 8), (byte) asc}));
+        codec = MediaCodec.createDecoderByType("audio/mp4a-latm");
+        codec.configure(format, null, null, 0);
+        codec.start();
+        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+        while (!closed && !ended) {
+          if (!focused) {
+            if (frame != null) {
+              Arrays.fill(frame, (byte) 0);
+              frame = null;
+            }
+            clear();
+            Thread.sleep(20);
+            continue;
+          }
+          if (frame == null) frame = pending.poll();
+          if (frame != null) {
+            int input = codec.dequeueInputBuffer(5000);
+            if (input >= 0) {
+              ByteBuffer buffer = codec.getInputBuffer(input);
+              if (buffer == null || buffer.capacity() < frame.length)
+                throw new IOException("AAC input capacity");
+              buffer.clear();
+              buffer.put(frame);
+              codec.queueInputBuffer(input, 0, frame.length, samples * 1000000L / rate, 0);
+              samples += 1024;
+              Arrays.fill(frame, (byte) 0);
+              frame = null;
+            }
+          }
+          int output = codec.dequeueOutputBuffer(info, 5000);
+          if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+            MediaFormat actual = codec.getOutputFormat();
+            int r = actual.getInteger(MediaFormat.KEY_SAMPLE_RATE),
+                ch = actual.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+            int encoding =
+                actual.containsKey(MediaFormat.KEY_PCM_ENCODING)
+                    ? actual.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                    : AudioFormat.ENCODING_PCM_16BIT;
+            if (encoding != AudioFormat.ENCODING_PCM_16BIT || (ch != 1 && ch != 2))
+              throw new IOException("AAC output PCM format");
+            int mask = ch == 1 ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO,
+                min = AudioTrack.getMinBufferSize(r, mask, encoding);
+            if (min < 1) throw new IOException("audio buffer unavailable");
+            if (track != null) {
+              track.release();
+              track = null;
+            }
+            track =
+                new AudioTrack.Builder()
+                    .setAudioAttributes(attributes())
+                    .setAudioFormat(
+                        new AudioFormat.Builder()
+                            .setEncoding(encoding)
+                            .setSampleRate(r)
+                            .setChannelMask(mask)
+                            .build())
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .setBufferSizeInBytes(Math.max(min * 2, r * ch * 2 / 10))
+                    .build();
+            if (track.getState() != AudioTrack.STATE_INITIALIZED)
+              throw new IOException("AudioTrack state");
+            track.play();
+            DiagnosticLog.add(context, "AAC 解码输出：" + r + " Hz，" + ch + " 声道，PCM16；AudioTrack 已开始。");
+          } else if (output >= 0) {
+            try {
+              if (info.size > 0 && track != null && focused) {
+                ByteBuffer pcm = codec.getOutputBuffer(output);
+                if (pcm == null) throw new IOException("audio output unavailable");
+                pcm.position(info.offset);
+                pcm.limit(info.offset + info.size);
+                boolean signal = false;
+                for (int at = pcm.position(); at < pcm.limit(); at++)
+                  if (pcm.get(at) != 0) {
+                    signal = true;
+                    break;
+                  }
+                int total = 0;
+                while (pcm.hasRemaining() && !closed && !ended && focused) {
+                  int n = track.write(pcm, pcm.remaining(), AudioTrack.WRITE_BLOCKING);
+                  if (n < 0) throw new IOException("audio write failed");
+                  if (n == 0) break;
+                  total += n;
+                }
+                if (total > 0) {
+                  decoded++;
+                  if (signal) nonzero++;
+                  if (decoded <= 3 || decoded % 200 == 0) {
+                    AudioDeviceInfo route = track.getRoutedDevice();
+                    DiagnosticLog.add(
+                        context,
+                        "PCM 已写入播放设备："
+                            + decoded
+                            + " 块，非零 "
+                            + nonzero
+                            + " 块，输出设备类型 "
+                            + (route == null ? 0 : route.getType())
+                            + "；实际出声请听音确认。");
+                  }
+                }
+              }
+            } finally {
+              codec.releaseOutputBuffer(output, false);
+            }
+          }
+        }
+      } catch (IOException | RuntimeException | InterruptedException e) {
+        if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+        if (!closed && !ended)
+          DiagnosticLog.add(context, "AAC 播放流停止：" + e.getClass().getSimpleName());
+      } finally {
+        finished = System.nanoTime();
+        ended = true;
+        if (frame != null) Arrays.fill(frame, (byte) 0);
+        clear();
+        if (track != null) {
+          try {
+            track.stop();
+          } catch (RuntimeException ignored) {
+          }
+          track.release();
+          track = null;
+        }
+        if (codec != null) {
+          try {
+            codec.stop();
+          } catch (RuntimeException ignored) {
+          }
+          codec.release();
+        }
+      }
+    }
+  }
+}
